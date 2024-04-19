@@ -2,7 +2,7 @@ Changelog
 =========
 
 
-Version 3.3.2
+Version 3.3.3
 -------------
 
 *Unreleased*
@@ -11,6 +11,33 @@ Improvements
 ^^^^^^^^^^^^
 
 - Nothing so far :(
+
+Bugfixes
+^^^^^^^^
+
+- Nothing so far :)
+
+Internal Changes
+^^^^^^^^^^^^^^^^
+
+- Nothing so far
+
+
+Version 3.3.2
+-------------
+
+*Released on April 19, 2024*
+
+Improvements
+^^^^^^^^^^^^
+
+- Use more verbose page titles in management/admin areas (:pr:`6300`)
+- Prioritize exact matches when searching for users (:pr:`6254`)
+- Show document templates from non-parent categories and other events for cloning
+  as long as the user has management access (:pr:`6232`)
+- Warn about conflicts from concurrent edits of minutes (:issue:`3410`, :pr:`6193`)
+- Include up to two months (up from one week) of past events in dashboard iCal export
+  (:pr:`6304`)
 
 Bugfixes
 ^^^^^^^^
@@ -35,6 +62,8 @@ Internal Changes
 
 - Allow plugins to fully replace the data in a ticket QR code with a custom string
   instead of just modifying/extending the JSON dict (:pr:`6266`)
+- Replace deprecated ``pkg_resources`` with ``importlib`` from standard library
+  (:issue:`6272`, :pr:`6273`, thanks :user:`maxnoe`)
 
 
 Version 3.3.1

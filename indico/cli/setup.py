@@ -11,6 +11,7 @@ import shutil
 import socket
 import subprocess
 import sys
+from importlib.metadata import entry_points
 from operator import attrgetter
 from pathlib import Path
 from smtplib import SMTP
@@ -21,7 +22,6 @@ from click import wrap_text
 from flask.helpers import get_root_path
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
-from pkg_resources import iter_entry_points
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import PathCompleter, WordCompleter
 from prompt_toolkit.styles import Style
@@ -181,7 +181,7 @@ def list_plugins():
     """List the available Indico plugins."""
     import_all_models()
     table_data = [['Name', 'Title']]
-    for ep in sorted(iter_entry_points('indico.plugins'), key=attrgetter('name')):
+    for ep in sorted(entry_points(group='indico.plugins'), key=attrgetter('name')):
         plugin = ep.load()
         table_data.append([ep.name, plugin.title])
     table = AsciiTable(table_data, cformat('%{white!}Available Plugins%{reset}'))
@@ -339,8 +339,8 @@ class SetupWizard:
         self._check_root()
         self._check_venv()
         self._prompt_root_path(dev=dev)
-        self.config_dir_path = (get_root_path('indico') if dev else os.path.join(self.root_path, 'etc'))
-        self.config_path = os.path.join(self.config_dir_path, 'indico.conf')
+        self.config_dir_path = Path(get_root_path('indico') if dev else os.path.join(self.root_path, 'etc'))
+        self.config_path = self.config_dir_path / 'indico.conf'
         self._check_configured()
         self._check_directories(dev=dev)
         self._prompt_indico_url(dev=dev)
@@ -390,7 +390,7 @@ class SetupWizard:
 
     def _check_configured(self):
         # Bail out early if indico is already configured
-        if os.path.exists(self.config_path):
+        if self.config_path.exists():
             _error(
                 f'Config file already exists. If you really want to run this wizard again, delete {self.config_path}'
             )
@@ -671,8 +671,7 @@ class SetupWizard:
             os.mkdir(path)
 
         _echo(cformat('%{magenta}Creating %{magenta!}{}%{reset}%{magenta}').format(self.config_path))
-        with open(self.config_path, 'w') as f:
-            f.write(config + '\n')
+        self.config_path.write_text(f'{config}\n')
 
         package_root = get_root_path('indico')
         _copy(os.path.normpath(os.path.join(package_root, 'logging.yaml.sample')),

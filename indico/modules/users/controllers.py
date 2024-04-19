@@ -7,7 +7,7 @@
 
 from collections import namedtuple
 from io import BytesIO
-from operator import attrgetter, itemgetter
+from operator import attrgetter
 
 from dateutil.relativedelta import relativedelta
 from flask import flash, jsonify, redirect, render_template, request, session
@@ -57,7 +57,7 @@ from indico.util.i18n import _, force_locale
 from indico.util.images import square
 from indico.util.marshmallow import HumanizedDate, Principal, validate_with_message
 from indico.util.signals import values_from_signal
-from indico.util.string import make_unique_token
+from indico.util.string import make_unique_token, remove_accents
 from indico.web.args import use_args, use_kwargs
 from indico.web.flask.templating import get_template_module
 from indico.web.flask.util import send_file, url_for
@@ -71,14 +71,13 @@ IDENTITY_ATTRIBUTES = {'first_name', 'last_name', 'email', 'affiliation', 'full_
 UserEntry = namedtuple('UserEntry', IDENTITY_ATTRIBUTES | {'profile_url', 'avatar_url', 'user'})
 
 
-def get_events_in_categories(category_ids, user, limit=10):
+def get_events_in_categories(category_ids, user, from_, limit=10):
     """Get all the user-accessible events in a given set of categories."""
     tz = session.tzinfo
-    today = now_utc(False).astimezone(tz).date()
     query = (Event.query
              .filter(~Event.is_deleted,
                      Event.category_chain_overlaps(category_ids),
-                     Event.start_dt.astimezone(session.tzinfo) >= today)
+                     Event.start_dt.astimezone(session.tzinfo) >= from_.astimezone(tz).date())
              .options(joinedload('category').load_only('id', 'title'),
                       joinedload('series'),
                       joinedload('label'),
@@ -137,7 +136,7 @@ class RHUserDashboard(RHUserBase):
         categories_events = []
         if categories:
             category_ids = {c['categ'].id for c in categories.values()}
-            categories_events = get_events_in_categories(category_ids, self.user)
+            categories_events = get_events_in_categories(category_ids, self.user, now_utc(False))
         from_dt = now_utc(False) - relativedelta(weeks=1, hour=0, minute=0, second=0)
         linked_events = [(event, {'management': bool(roles & self.management_roles),
                                   'reviewing': bool(roles & self.reviewer_roles),
@@ -159,9 +158,9 @@ class RHExportDashboardICS(RHProtected):
         return session.user
 
     @use_kwargs({
-        'from_': HumanizedDate(data_key='from', load_default=lambda: now_utc(False) - relativedelta(weeks=1)),
+        'from_': HumanizedDate(data_key='from', load_default=None),
         'include': fields.List(fields.Str(), load_default=lambda: {'linked', 'categories'}),
-        'limit': fields.Integer(load_default=100, validate=lambda v: 0 < v <= 500)
+        'limit': fields.Integer(load_default=250, validate=lambda v: 0 < v <= 500)
     }, location='query')
     def _process(self, from_, include, limit):
         user = self._get_user()
@@ -177,7 +176,8 @@ class RHExportDashboardICS(RHProtected):
 
         if 'categories' in include and (categories := get_related_categories(user)):
             category_ids = {c['categ'].id for c in categories.values()}
-            all_events |= set(get_events_in_categories(category_ids, user, limit=limit))
+            cats_from = from_ or (now_utc(False) - relativedelta(months=2, hour=0, minute=0, second=0))
+            all_events |= set(get_events_in_categories(category_ids, user, cats_from, limit=limit))
 
         all_events = sorted(all_events, key=lambda e: (e.start_dt, e.id))[:limit]
 
@@ -594,7 +594,7 @@ class RHUserEmailsSetPrimary(RHUserBase):
                 update_gravatars.delay(self.user)
             flash(_('Your primary email was updated successfully.'), 'success')
             if 'email' in self.user.synced_fields:
-                self.user.synced_fields = self.user.synced_fields - {'email'}
+                self.user.synced_fields -= {'email'}
                 flash(_('Email address synchronization has been disabled since you manually changed your primary'
                         ' email address.'), 'warning')
         return redirect(url_for('.user_emails'))
@@ -896,7 +896,18 @@ class RHUserSearch(RHProtected):
     def _process(self, exact, external, favorites_first, **criteria):
         matches = search_users(exact=exact, include_pending=True, external=external, **criteria)
         self.externals = {}
-        results = sorted((self._serialize_entry(entry) for entry in matches), key=itemgetter('full_name', 'email'))
+
+        def _sort_key(entry):
+            # Sort results by providing exact matches first, initially considering accents, and
+            # then without considering accents.
+            exact_match_keys = [entry[k].lower() != v.lower() for k, v in criteria.items()]
+            unaccent_exact_match_keys = [
+                remove_accents(entry[k].lower()) != remove_accents(v.lower())
+                for k, v in criteria.items()
+            ]
+            return *exact_match_keys, *unaccent_exact_match_keys, entry['full_name'], entry['email']
+
+        results = sorted((self._serialize_entry(entry) for entry in matches), key=_sort_key)
         if favorites_first:
             favorites = {u.id for u in session.user.favorite_users}
             results.sort(key=lambda x: x['id'] not in favorites)
